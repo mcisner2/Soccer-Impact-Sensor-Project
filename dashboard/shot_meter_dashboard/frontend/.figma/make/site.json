@@ -1,0 +1,10 @@
+{
+  "description": "Tracks soccer player movements via smart shin guard sensors, providing real-time stats and detailed session analysis for performance improvement.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
