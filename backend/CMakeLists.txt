@@ -15,10 +15,17 @@ FetchContent_MakeAvailable(googletest)
 
 # Everything except tests lives in this library so the tests (and later
 # the real app) can both link against it.
-add_library(backend_core src/packet_parser.cpp)
+add_library(backend_core
+  src/packet_parser.cpp
+  src/sequence_tracker.cpp
+)
 target_include_directories(backend_core PUBLIC src)
 
 enable_testing()
 add_executable(packet_parser_test tests/packet_parser_test.cpp)
 target_link_libraries(packet_parser_test backend_core GTest::gtest_main)
 add_test(NAME packet_parser_test COMMAND packet_parser_test)
+
+add_executable(sequence_tracker_test tests/sequence_tracker_test.cpp)
+target_link_libraries(sequence_tracker_test backend_core GTest::gtest_main)
+add_test(NAME sequence_tracker_test COMMAND sequence_tracker_test)
