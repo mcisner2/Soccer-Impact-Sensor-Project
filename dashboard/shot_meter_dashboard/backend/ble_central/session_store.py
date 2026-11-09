@@ -68,6 +68,11 @@ class SessionStore:
             previous = s.latest_status
             if packet.state == STATE_RECORDING and (previous is None or previous.state != STATE_RECORDING):
                 self.reset_sequence_tracking()
+            # The session timer only follows RECORDING time. A Status counts while RECORDING, and the
+            # one that reports the stop still counts, but the STOPPED / READY ones that keep arriving
+            # after it do not (the device clock may keep running, the session has ended).
+            if packet.state == STATE_RECORDING or (previous is not None and previous.state == STATE_RECORDING):
+                s.recording_ms = max(s.recording_ms, packet.t_ms)
             s.latest_status = packet  # no sequence number on Status
             self._notify()
             return
@@ -90,8 +95,10 @@ class SessionStore:
 
         if stream is Stream.EVENT:
             s.events.append(packet)
+            s.recording_ms = max(s.recording_ms, packet.t_ms)  # events are only sent while RECORDING
         elif stream is Stream.TELEMETRY:
             s.telemetry.append(packet)
+            s.recording_ms = max(s.recording_ms, packet.t_ms)  # so is telemetry
         else:
             s.raw_batches.append(packet)
         self._notify()

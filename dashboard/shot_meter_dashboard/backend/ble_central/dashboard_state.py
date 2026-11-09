@@ -73,15 +73,9 @@ def build_snapshot(vm: DashboardViewModel) -> Dict[str, Any]:
     latest_event = events[-1] if events else None
     peak_event = max(events, key=lambda e: e.peak_accel_centi_g) if events else None
 
-    # ---- session clock: the device reports t_ms since the recording started ----
-    t_candidates = [0]
-    if status:
-        t_candidates.append(status.t_ms)
-    if events:
-        t_candidates.append(events[-1].t_ms)
-    if latest_tel:
-        t_candidates.append(latest_tel.t_ms)
-    duration_s = max(t_candidates) / 1000.0
+    # ---- session clock: how long the sensor has been RECORDING (device time since the recording
+    # started). It stops when the session stops, and a new session starts again from 0. ----
+    duration_s = session.recording_ms / 1000.0
 
     def event_dict(e) -> Dict[str, Any]:
         return {
