@@ -72,4 +72,18 @@ namespace config
     constexpr uint32_t calRezeroStillMs = 2000;     // stillness needed before the bias is touched mid-session (spec 5.1)
     constexpr float calRezeroBlend = 0.25f;         // share of a new still-window estimate blended into the bias
     constexpr float calRezeroMaxStepDps = 1.0f;     // bigger jump than this in one blend = probably slow rotation, ignored
+
+    // Peak detector, spec 5.2/5.3. Tuned on synthetic data only [ASSUMPTION], retune on real kicks.
+    constexpr float detKMad = 8.0f;                  // threshold = median + K * 1.4826 * MAD of recent dynamic accel
+    constexpr float detMinPeakG = 5.0f;              // floor under the threshold. On synthetic data the adaptive term never beats it
+    constexpr uint32_t detRefractoryMs = 150;        // peaks closer than this: only the highest is kept (0.30 s merged kicks under 0.35 s apart in the synthetic stress test)
+    constexpr float detKickGyroDps = 650.0f;         // gyro peak near the impact needed to call it a KICK
+    // PASS and TRAP. Rough physical guesses [ASSUMPTION], no real pass or trap data exists yet, only the rules are tested
+    constexpr bool detClassifyPassTrap = true;       // false = only KICK and HARD_IMPACT, exactly as the Python prototype
+    constexpr float detSoftMinPeakG = 5.0f;          // 5.0 = same as detMinPeakG = TRAP switched off. Lower it (2.5) to see soft contacts; on the synthetic data that alone gave 140 to 230 false PASS/TRAP events per 3 min session at 3.0 to 3.5 g (running strides), still 53 at 4.0 g
+    constexpr float detPassGyroDps = 250.0f;         // swing at or above this = a pass, below = a trap or a knock
+    constexpr uint32_t detGyroBeforeMs = 150;        // gyro window around the impact: the swing comes before ball contact
+    constexpr uint32_t detGyroAfterMs = 50;          // must stay <= detRefractoryMs (the detector clamps it)
+    constexpr uint32_t detBaselineWindowMs = 5000;   // trailing window for the threshold statistics
+    constexpr uint32_t detBaselineHopMs = 1000;      // threshold refreshed this often
 }
