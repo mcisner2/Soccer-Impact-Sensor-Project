@@ -87,7 +87,7 @@ def test_no_error_and_unknown_error():
 
 # ---- event ----
 
-@pytest.mark.parametrize("cls,name", [(0, "UNKNOWN"), (1, "KICK"), (2, "PASS"), (3, "TRAP"), (4, "GROUND_IMPACT")])
+@pytest.mark.parametrize("cls,name", [(0, "UNKNOWN"), (1, "KICK"), (2, "HARD_IMPACT"), (3, "PASS"), (4, "TRAP")])
 def test_event_class_names(cls, name):
     p = parse(encode_event(cls, 1, 1, 100, 10, 10))
     assert p.event_class == cls and p.event_class_name == name
