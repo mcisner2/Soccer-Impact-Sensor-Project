@@ -178,6 +178,17 @@ def test_start_session_before_calibration_is_rejected_with_a_dashboard_message()
     assert err == "ERR_NOT_CALIBRATED" and "Calibrate" in msg
     assert n_events == 0                           # nothing recorded without calibration
 
+async def wait_for_condition(predicate, timeout=3.0, step=0.01):
+    """Poll until predicate() is true, so a test does not depend on how long a sleep really takes.
+
+    On Windows a short asyncio.sleep can take about 60% longer than asked, which made fixed waits flaky.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not predicate():
+        if loop.time() > deadline:
+            raise AssertionError("timed out waiting for the fake sensor")
+        await asyncio.sleep(step)
 
 def test_full_flow_calibrate_record_stop():
     async def go():
@@ -186,11 +197,11 @@ def test_full_flow_calibrate_record_stop():
         seen = []
         vm.subscribe(lambda: seen.append(vm.device_state_name))
         await vm.connect_to_sensor()
-        await asyncio.sleep(0.1)
+        await wait_for_condition(lambda: vm.connection_state == ConnectionState.SUBSCRIBED)
         await vm.start_calibration()
         await asyncio.sleep(0.1)
         calibrating = vm.device_state_name
-        await asyncio.sleep(0.4)                   # calibration finishes -> READY
+        await wait_for_condition(lambda: vm.device_state_name == "READY")   # calibration finishes -> READY
         ready = vm.device_state_name
         await vm.start_session()
         await asyncio.sleep(0.4)
@@ -217,15 +228,19 @@ def test_second_session_with_restarted_sequence_numbers_loses_nothing():
         ble = fast_mock(auto_start=False, restart_seq_on_session=True)
         vm = DashboardViewModel(ble)
         await vm.connect_to_sensor()
-        await asyncio.sleep(0.1)
-        await vm.start_calibration(); await asyncio.sleep(0.4)
-        await vm.start_session();     await asyncio.sleep(0.5)
+        await wait_for_condition(lambda: vm.connection_state == ConnectionState.SUBSCRIBED)
+        await vm.start_calibration()
+        await wait_for_condition(lambda: vm.device_state_name == "READY")
+        await vm.start_session()
+        await wait_for_condition(lambda: len(vm.session.events) > 3)
         first = len(vm.session.events)
-        await vm.stop_session();      await asyncio.sleep(0.1)
-        await vm.start_session();     await asyncio.sleep(0.5)   # firmware counters back to 0
+        await vm.stop_session()
+        await wait_for_condition(lambda: vm.device_state_name == "STOPPED")
+        await vm.start_session()                                          # firmware counters back to 0
+        await wait_for_condition(lambda: len(vm.session.events) >= first + 3)
         second_total = len(vm.session.events)
         await vm.disconnect_from_sensor()
-        return vm, first, second_total
+        return vm, first, second_total  
 
     vm, first, total = run(go())
     assert first > 3 and total >= first + 3        # the new session's events arrived
