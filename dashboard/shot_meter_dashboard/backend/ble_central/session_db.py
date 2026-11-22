@@ -4,6 +4,9 @@ A session is saved automatically when the player presses Stop, and can be discar
 from the Sessions page. Only what the dashboard needs is kept: a summary row, plus the
 detected events and GPS readings. Raw IMU batches are NOT saved (they are large and only
 exist in data-collection mode).
+
+Live-test mode also tags the session (sessions.live_test) and keeps the events a person marked
+as wrongly flagged (events.wrong), so the labels can be used to tune the peak detector.
 """
 from __future__ import annotations
 
@@ -11,7 +14,7 @@ import sqlite3
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 from .models import Session
 
@@ -26,7 +29,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     peak_g        REAL,
     distance_m    REAL NOT NULL,
     avg_speed_mph REAL NOT NULL,
-    max_speed_mph REAL NOT NULL
+    max_speed_mph REAL NOT NULL,
+    live_test     INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS events (
     session_id     INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -36,7 +40,8 @@ CREATE TABLE IF NOT EXISTS events (
     peak_accel_cg  INTEGER NOT NULL,
     peak_gyro_dps  INTEGER NOT NULL,
     confidence     INTEGER NOT NULL,
-    flags          INTEGER NOT NULL
+    flags          INTEGER NOT NULL,
+    wrong          INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS telemetry (
     session_id   INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -54,6 +59,13 @@ CREATE INDEX IF NOT EXISTS telemetry_by_session ON telemetry(session_id);
 """
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    """Add a column to a table made by an older version of this file (CREATE IF NOT EXISTS keeps old tables as they were)."""
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
 class SessionDatabase:
     def __init__(self, path: Union[str, Path]) -> None:
         self._path = str(path)
@@ -62,6 +74,8 @@ class SessionDatabase:
         self.version = 0
         with closing(self._connect()) as conn, conn:
             conn.executescript(_SCHEMA)
+            _ensure_column(conn, "sessions", "live_test", "INTEGER NOT NULL DEFAULT 0")
+            _ensure_column(conn, "events", "wrong", "INTEGER NOT NULL DEFAULT 0")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._path)
@@ -70,33 +84,37 @@ class SessionDatabase:
         return conn
 
     # --- writing ---
-    def save_session(self, session: Session, summary: Dict[str, Any]) -> int:
+    def save_session(self, session: Session, summary: Dict[str, Any], live_test: bool = False,
+                     wrong_events: Optional[Set[int]] = None) -> int:
         """Write one session (and its events / GPS readings) to disk. Returns the new session id.
 
         `summary` is the dict from build_snapshot(); its numbers are stored as-is so the
         Sessions page can list sessions without recomputing anything.
+        `wrong_events` holds the positions (0 = first) of events marked as wrongly flagged.
         """
         s = summary["session"]
         m = summary["movement"]
+        wrong = wrong_events or set()
         with closing(self._connect()) as conn, conn:
             cur = conn.execute(
                 "INSERT INTO sessions (started_at, saved_at, duration_s, kicks, events_total, peak_g,"
-                " distance_m, avg_speed_mph, max_speed_mph) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " distance_m, avg_speed_mph, max_speed_mph, live_test) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     session.started_at.isoformat(timespec="seconds"),
                     datetime.now().isoformat(timespec="seconds"),
                     s["duration_s"], s["kicks"], s["events_total"], s["peak_g"],
                     m["distance_m"], m["avg_speed_mph"], m["max_speed_mph"],
+                    1 if live_test else 0,
                 ),
             )
             session_id = cur.lastrowid
             conn.executemany(
                 "INSERT INTO events (session_id, seq, t_ms, event_class, peak_accel_cg, peak_gyro_dps,"
-                " confidence, flags) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                " confidence, flags, wrong) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (session_id, e.sequence_number, e.t_ms, int(e.event_class), e.peak_accel_centi_g,
-                     e.peak_gyro_dps, e.confidence, e.flags)
-                    for e in session.events
+                     e.peak_gyro_dps, e.confidence, e.flags, 1 if i in wrong else 0)
+                    for i, e in enumerate(session.events)
                 ],
             )
             conn.executemany(
@@ -111,7 +129,8 @@ class SessionDatabase:
         self.version += 1
         return session_id
 
-    def save_once(self, session: Session, summary: Dict[str, Any]) -> Optional[int]:
+    def save_once(self, session: Session, summary: Dict[str, Any], live_test: bool = False,
+                  wrong_events: Optional[Set[int]] = None) -> Optional[int]:
         """Save this session unless it was already saved or has nothing in it.
 
         Pressing Stop twice must not create two copies, and a session with no events and no
@@ -122,7 +141,7 @@ class SessionDatabase:
             return None
         if not session.events and not session.telemetry:
             return None
-        session_id = self.save_session(session, summary)
+        session_id = self.save_session(session, summary, live_test=live_test, wrong_events=wrong_events)
         self._last_saved = session
         return session_id
 
@@ -140,6 +159,9 @@ class SessionDatabase:
         with closing(self._connect()) as conn:
             rows = conn.execute(
                 "SELECT id, started_at, saved_at, duration_s, kicks, events_total, peak_g, distance_m,"
-                " avg_speed_mph, max_speed_mph FROM sessions ORDER BY id DESC"
+                " avg_speed_mph, max_speed_mph, live_test FROM sessions ORDER BY id DESC"
             ).fetchall()
-        return [dict(row) for row in rows]
+        sessions = [dict(row) for row in rows]
+        for session in sessions:
+            session["live_test"] = bool(session["live_test"])
+        return sessions
