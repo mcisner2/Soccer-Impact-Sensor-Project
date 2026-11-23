@@ -60,6 +60,19 @@ namespace config
     constexpr uint32_t gpsNoFixTimeoutMs = 90000;  // spec 8, WARN_GPS_NO_FIX
     constexpr uint8_t gpsMaxGoodHdopX10 = 20;      // HDOP above 2.0 = degraded, spec 8 [ASSUMPTION]
 
+    // Calibration, spec 5.1. Every number is an [ASSUMPTION] until it has been checked on the bench.
+    constexpr uint32_t calSeconds = 4;              // stand-still window at the start of a session
+    constexpr float calStillAccelMeanTolG = 0.10f;  // mean |a| must be within 1 g +- this
+    constexpr float calStillAccelStdG = 0.05f;      // spread of |a| allowed while "still"
+    constexpr float calStillGyroStdDps = 0.5f;      // per-axis gyro spread allowed while "still". Depends on the chip's
+                                                    // low-pass filter, which isn't configured yet: print the at-rest std and retune
+    constexpr float calGyroBiasMaxDps = 5.0f;       // datasheet initial zero-rate tolerance, a bigger bias means a fault or motion
+    constexpr float calGravityTolG = 0.15f;         // |mean accel vector| must be within 1 g +- this
+    constexpr float calRefreshTempDeltaC = 5.0f;    // die temp moved this far since calibration = stale (spec 5.1)
+    constexpr uint32_t calRezeroStillMs = 2000;     // stillness needed before the bias is touched mid-session (spec 5.1)
+    constexpr float calRezeroBlend = 0.25f;         // share of a new still-window estimate blended into the bias
+    constexpr float calRezeroMaxStepDps = 1.0f;     // bigger jump than this in one blend = probably slow rotation, ignored
+
     // Peak detector, spec 5.2/5.3. Tuned on synthetic data only [ASSUMPTION], retune on real kicks.
     constexpr float detKMad = 8.0f;                  // threshold = median + K * 1.4826 * MAD of recent dynamic accel
     constexpr float detMinPeakG = 5.0f;              // floor under the threshold. On synthetic data the adaptive term never beats it

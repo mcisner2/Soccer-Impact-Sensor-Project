@@ -1,6 +1,6 @@
 // firmware.ino
-// Step 7: the session state machine runs everything. Calibration is still a placeholder, replaced
-// by Edward's module later. The peak detector is Edward's (detector.h / detector.cpp).
+// Step 7: the session state machine runs everything. Calibration (spec 5.1) and the peak detector
+// (spec 5.2) are Edward's modules: calibration.h / calibration.cpp and detector.h / detector.cpp.
 
 #include "config.h"
 #include "imu.h"
@@ -61,9 +61,12 @@ void onImuSample(const ImuSample& sample)
         return;
     }
 
-    // Calibration is still the placeholder, so the gyro bias is not removed yet. When Edward's calibration
-    // goes in, the sample goes through calibration::apply() first and the detector gets the result.
-    detector.feed(sample);  // the hook stays fast: events come out through popEvent() in loop()
+    // Spec 5.1: the re-zero looks at the RAW sample and only nudges the bias after a long still stretch.
+    // Then the gyro bias comes off before the detector sees the sample (accel passes through unchanged).
+    calibration::opportunisticUpdate(sample);
+    ImuSample calibrated;
+    calibration::apply(sample, calibrated);
+    detector.feed(calibrated);  // the hook stays fast: events come out through popEvent() in loop()
 }
 
 void handleCommands()
@@ -266,6 +269,19 @@ void loop()
             Serial.printf("cal gravity %.3f %.3f %.3f g (|g| %.3f) | gyro bias %.2f %.2f %.2f dps | temp %.1f C\n",
                 cal.gravityG[0], cal.gravityG[1], cal.gravityG[2], g,
                 cal.gyroBiasDps[0], cal.gyroBiasDps[1], cal.gyroBiasDps[2], cal.tempAtCalC);
+            // how much the readings wobbled while the board sat still: the stillness limits in config.h (cal...) are tuned against this
+            Serial.printf("cal at-rest spread: gyro std %.3f %.3f %.3f dps | accel |a| std %.4f g\n",
+                cal.gyroStdDps[0], cal.gyroStdDps[1], cal.gyroStdDps[2], cal.accelMagStdG);
+        }
+
+        // a failed calibration keeps the values it measured, so print what the sensor saw
+        if (calibration::state() == CalState::failed)
+        {
+            CalResult cal = calibration::result();
+            Serial.printf("cal FAILED code 0x%02X | gyro std %.3f %.3f %.3f dps | accel |a| std %.4f g | gyro bias %.2f %.2f %.2f dps\n",
+                (unsigned)cal.errorCode,
+                cal.gyroStdDps[0], cal.gyroStdDps[1], cal.gyroStdDps[2], cal.accelMagStdG,
+                cal.gyroBiasDps[0], cal.gyroBiasDps[1], cal.gyroBiasDps[2]);
         }
     }
 
