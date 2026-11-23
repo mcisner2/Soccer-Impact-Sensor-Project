@@ -72,6 +72,7 @@ class MockBLEManager(BaseBLEManager):
         self.commands_sent: List[Tuple[Command, int]] = []
         self._task: Optional[asyncio.Task] = None
         self._tick = 0
+        self._clock_base_tick = 0  # t_ms counts from here; moved forward when a recording starts
         self._seq = {s: 0 for s in Stream}   # one counter per stream, like the firmware
         self._sent = {s: 0 for s in Stream}
         self._battery_mv = 4800
@@ -119,6 +120,9 @@ class MockBLEManager(BaseBLEManager):
                 self._error = ERR_NOT_CALIBRATED          # rejected, state unchanged
             elif self._dev_state in (READY, STOPPED):
                 self._dev_state, self._error = RECORDING, 0
+                # The spec says t_ms is milliseconds since session start, so the device clock
+                # restarts with every new recording.
+                self._clock_base_tick = self._tick
                 if self.restart_seq_on_session:
                     self._seq = {s: 0 for s in Stream}
                     self._sent = {s: 0 for s in Stream}
@@ -177,7 +181,7 @@ class MockBLEManager(BaseBLEManager):
             await asyncio.sleep(self.reconnect_delay_s)
 
     def _now_ms(self) -> int:
-        return self._tick * int(self.interval_s * 1000)
+        return (self._tick - self._clock_base_tick) * int(self.interval_s * 1000)
 
     def _emit_status(self) -> None:
         flags = (_FLAG_RAW_ON if self._raw_on else 0) | (

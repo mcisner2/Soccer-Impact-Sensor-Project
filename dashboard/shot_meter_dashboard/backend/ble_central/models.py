@@ -227,6 +227,10 @@ class Session:
     )
     missed_by_stream: Dict[Stream, int] = field(default_factory=lambda: {s: 0 for s in Stream})
     parse_error_count: int = 0
+    # Device time (ms since the recording started) up to which this session has been RECORDING.
+    # The dashboard's timer reads this, so it stops when the session stops and starts from 0 for a
+    # new session. Status packets that arrive after Stop do not move it.
+    recording_ms: int = 0
 
     @property
     def missed_packet_count(self) -> int:
