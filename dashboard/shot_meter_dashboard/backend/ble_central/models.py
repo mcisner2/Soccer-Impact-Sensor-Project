@@ -24,18 +24,20 @@ class ConnectionState(Enum):
 class EventClass(IntEnum):
     """Known event classes.
 
-    CONFLICT TO RESOLVE: the firmware owner's list is 1 kick, 2 pass, 3 trap, 4 ground impact
-    (used here). Ed's Interface Specification v0.1 says 0 UNKNOWN, 1 KICK, 2 HARD_IMPACT and
-    treats pass/trap as a later refinement. Class 2 therefore means different things in the two
-    documents. The parser accepts ANY class value (never drops an event over it); only the
-    display names below depend on this table.
+    These are the numbers the firmware's peak detector sends (Edward's detector.h, and spec 6.3 for
+    0-2): 1 KICK, 2 HARD_IMPACT, 3 PASS, 4 TRAP. The older firmware stand-in only ever sent class 1.
+
+    RESOLVED: this table used to follow the firmware owner's earlier list (2 pass, 3 trap, 4 ground
+    impact), which disagreed with the spec's 2 = HARD_IMPACT. The detector's numbering is now the
+    single source of truth. The parser still accepts ANY class value (never drops an event over it);
+    only the display names below depend on this table.
     """
 
     UNKNOWN = 0
     KICK = 1
-    PASS = 2
-    TRAP = 3
-    GROUND_IMPACT = 4
+    HARD_IMPACT = 2
+    PASS = 3
+    TRAP = 4
 
 
 EVENT_CLASS_NAMES: Dict[int, str] = {c.value: c.name for c in EventClass}
@@ -128,7 +130,7 @@ class Status:
 
 @dataclass(frozen=True)
 class Event:
-    """Event packet (0x02): a detected kick / pass / trap / ground impact."""
+    """Event packet (0x02): a detected kick / hard impact / pass / trap."""
 
     event_class: int  # see EventClass; unknown values are kept, not rejected
     sequence_number: int
