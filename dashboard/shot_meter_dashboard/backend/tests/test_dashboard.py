@@ -88,9 +88,10 @@ def test_series_is_downsampled_and_keeps_ends():
 def test_only_kicks_count_as_kicks_and_peak_is_highest():
     vm = fresh_vm()
     feed(vm, [
+        encode_status(4, 0, 0x08, 4800, 250, 0),              # the recording starts: time zero
         encode_event(1, 0, 10_000, 1500, 900, 80),
         encode_event(1, 1, 20_000, 2500, 1000, 90),
-        encode_event(4, 2, 30_000, 4000, 100, 70),   # ground impact: not a kick
+        encode_event(4, 2, 30_000, 4000, 100, 70),   # trap: not a kick
         encode_status(4, 0, 0x08, 4800, 250, 60_000),
     ])
     s = build_snapshot(vm)["session"]

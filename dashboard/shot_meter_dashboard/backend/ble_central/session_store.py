@@ -6,12 +6,15 @@ sequence number, so it is never tracked.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, TypeVar
 
 from .models import STATE_RECORDING, Event, Packet, RawBatch, Session, Status, Stream, Telemetry
 
 _SEQ_MOD = 0x10000  # sequence numbers are UInt16 and wrap at 65535
+
+_Stamped = TypeVar("_Stamped", Status, Telemetry)
 
 
 class SequenceTracker:
@@ -48,6 +51,9 @@ class SessionStore:
         self._session = Session()
         self._trackers: Dict[Stream, SequenceTracker] = {s: SequenceTracker() for s in Stream}
         self._subscribers: List[Callable[[Session], None]] = []
+        # What the sensor's clock read on the Status packet that started the current recording.
+        # See _in_recording_time().
+        self._clock_origin_ms: Optional[int] = None
 
     # --- reading ---
     @property
@@ -63,11 +69,16 @@ class SessionStore:
         s = self._session
 
         if isinstance(packet, Status):
-            # A new recording may restart the firmware's sequence counters. Without this, a counter
-            # that restarts at 0 would look "behind" and every event would be dropped as a duplicate.
             previous = s.latest_status
-            if packet.state == STATE_RECORDING and (previous is None or previous.state != STATE_RECORDING):
+            entering_recording = packet.state == STATE_RECORDING and (
+                previous is None or previous.state != STATE_RECORDING)
+            if entering_recording:
+                # A new recording may restart the firmware's sequence counters. Without this, a counter
+                # that restarts at 0 would look "behind" and every event would be dropped as a duplicate.
                 self.reset_sequence_tracking()
+                # ...and this Status is "time zero" for the recording's Status and Telemetry stamps.
+                self._clock_origin_ms = packet.t_ms
+            packet = self._in_recording_time(packet)
             # The session timer only follows RECORDING time. A Status counts while RECORDING, and the
             # one that reports the stop still counts, but the STOPPED / READY ones that keep arriving
             # after it do not (the device clock may keep running, the session has ended).
@@ -81,6 +92,7 @@ class SessionStore:
             stream = Stream.EVENT
         elif isinstance(packet, Telemetry):
             stream = Stream.TELEMETRY
+            packet = self._in_recording_time(packet)  # GPS packets carry the board's clock, see below
         elif isinstance(packet, RawBatch):
             stream = Stream.RAW
         else:  # pragma: no cover
@@ -103,6 +115,21 @@ class SessionStore:
             s.raw_batches.append(packet)
         self._notify()
 
+    def _in_recording_time(self, packet: _Stamped) -> _Stamped:
+        """Re-stamp a Status or Telemetry packet so its t_ms counts from the start of the recording.
+
+        The spec says t_ms is milliseconds since the session started, and the mock sensor does that.
+        The real firmware stamps Status and Telemetry with the board's own clock (millis(), the time
+        since power-on) but stamps Events with the session clock. So the stamp on the Status that
+        started the recording is taken as time zero, and subtracted from the later Status and
+        Telemetry stamps. A firmware that already counts from zero has a first stamp of about 0, so
+        nothing changes for it. Events are never adjusted.
+        """
+        origin = self._clock_origin_ms
+        if origin is None or packet.t_ms < origin:
+            return packet
+        return replace(packet, t_ms=packet.t_ms - origin)
+
     def reset_sequence_tracking(self) -> None:
         """Forget the last-seen sequence numbers (keeps all data). Called when a recording starts."""
         self._trackers = {s: SequenceTracker() for s in Stream}
@@ -124,6 +151,7 @@ class SessionStore:
         """Start a fresh session (e.g. a new drill)."""
         self._session = Session(started_at=datetime.now())
         self._trackers = {s: SequenceTracker() for s in Stream}
+        self._clock_origin_ms = None
         self._notify()
 
     def _notify(self) -> None:
